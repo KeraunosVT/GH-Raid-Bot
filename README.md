@@ -75,7 +75,11 @@ Set `DEV_GUILD_ID` to your own server's ID. Commands then register on that serve
 ## Growing
 
 - **No privileged intents** means nothing to apply for as the bot grows.
-- **At 75 servers**, Discord invites you to verify the bot. **Past 100**, it can't join more until you do. Verification needs a privacy policy and terms of service URL on the app. This bot stores Discord user and server IDs, display names, signups and settings, deletes runs 30 days after they start, and deletes a server's data when it's removed. A short page saying that is the substance of the privacy policy.
+- **At 75 servers**, Discord invites you to verify the bot. **Past 100**, it can't join more until you do. Verification needs a privacy policy and terms of service URL on the app. Put these two in the Developer Portal under **General Information**:
+  - Privacy Policy URL: `https://github.com/KeraunosVT/GH-Raid-Bot/blob/main/PRIVACY.md`
+  - Terms of Service URL: `https://github.com/KeraunosVT/GH-Raid-Bot/blob/main/TERMS.md`
+
+  If you change what the bot stores or how long it keeps it, update [`PRIVACY.md`](PRIVACY.md) in the same change.
 - **Around 2,500 servers** Discord requires sharding. That's a small change in `src/index.js` (discord.js `ShardingManager`), but not needed before then.
 
 ## Adding raids
@@ -106,6 +110,10 @@ TEST_DATABASE_URL=postgres://… npm test       # plus the database and interact
 ```
 
 The database tests create and drop their own schema, so they won't touch other tables, but point them at a scratch database anyway. [CI](.github/workflows/ci.yml) runs lint and every test against a Postgres service on each push and pull request.
+
+## Privacy and terms
+
+Using the bot is covered by its [Privacy Policy](PRIVACY.md) and [Terms of Service](TERMS.md).
 
 ## License
 
