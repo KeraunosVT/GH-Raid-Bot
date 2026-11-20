@@ -6,8 +6,9 @@ There's no website, no login and no per-server setup required, and one copy of t
 
 ## What it does
 
-**Posting a run.** `/raid post plan:normal 1-3 when:fri 8pm`
-- **plan** is modes and gates: `normal 1-3`, `nm 1`, `normal 1-3 + nightmare 1`, `difficult` (all gates). The box suggests plans as you type, and reads yours back so you can see it parsed.
+**Posting a run.** `/raid post when:fri 8pm`
+- **Picking the plan:** leave `plan` empty and you get a private picker with one menu per mode (Normal, Difficult, Nightmare). Tick any gates in any modes, for example all of Normal plus Nightmare gate 1. The picker shows the plan as you build it, and nothing posts until you press **Post run**.
+- **Or type it:** `plan:normal 1-3`, `nm 1`, `normal 1-3 + nightmare 1`, `hard 1,3`, `difficult` (all gates). The box suggests plans as you type, and reads yours back so you can see it parsed.
 - **when** is read on *your* clock: `fri 8pm`, `tomorrow 20:30`, `nov 21 9pm`, `2026-11-21 20:00`, `in 2h`. The box shows the exact time it understood before you post, and the post itself uses Discord timestamps, so everyone sees it in their own timezone. A bare `8` is refused rather than guessed.
 - Optional: `my_role` (sign yourself up), `title`, `notes`, `channel`.
 
@@ -18,7 +19,8 @@ There's no website, no login and no per-server setup required, and one copy of t
 - **⚙️ Manage:** the lead's private panel.
 
 **Managing a run** (its lead, the server's manager role, or anyone with Manage Server / Manage Events):
-- Edit the title, time, plan or notes.
+- Edit the title, time or notes.
+- **Change plan** opens the same picker, starting from the run's current gates.
 - Close or reopen signups, and ping the roster.
 - Move someone between roster and bench, or remove them.
 - Add someone who hasn't clicked.
@@ -78,7 +80,7 @@ Set `DEV_GUILD_ID` to your own server's ID. Commands then register on that serve
 
 ## Adding raids
 
-Add an entry to [`raids.json`](raids.json): its modes (easiest first, each with a colour, emoji and any short aliases like `nm`), how many gates it has, and its role caps. `/raid post` offers it in the `raid` option after a restart. Changing a raid's caps never reshuffles a run already posted: each run copies the caps when it's posted.
+Add an entry to [`raids.json`](raids.json): its modes (easiest first, each with a colour, emoji and any short aliases like `nm`), how many gates it has, and its role caps. The picker shows up to four modes, because Discord allows five rows and one holds the buttons. A typed plan reaches any mode. `/raid post` offers it in the `raid` option after a restart. Changing a raid's caps never reshuffles a run already posted: each run copies the caps when it's posted.
 
 ## Layout
 
@@ -91,6 +93,7 @@ Add an entry to [`raids.json`](raids.json): its modes (easiest first, each with 
 | `src/posts.js` | Keeping posts in step with the database; DMs |
 | `src/sweeper.js` | Reminders, closing at the start, cleanup |
 | `src/time.js` · `src/plan.js` | Reading typed times and plans |
+| `src/drafts.js` | Half-built posts and plan edits, held in memory while the picker is open |
 | `migrations/` | The schema, applied in order on start |
 
 ## Development

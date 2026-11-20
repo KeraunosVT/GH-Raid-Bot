@@ -234,6 +234,81 @@ test('interactions', { skip }, async (t) => {
     assert.match(bad.text(), /Couldn't read/);
   });
 
+  await t.test('posting without a plan opens the picker; ticking gates builds it', async () => {
+    const before = (await latestRun()).id;
+    const opened = await run({ kind: 'command', sub: 'post', strings: { when: 'in 3h', title: 'Picked', my_role: 'Healer' }, userId: 'picker' });
+    assert.equal(opened.last().type, 'reply');
+    assert.equal(opened.last().payload.flags, MessageFlags.Ephemeral);
+    assert.match(opened.text(), /\*\*Posting Picked\*\* for <t:\d+:F> in <#c1>/);
+    assert.equal((await latestRun()).id, before); // nothing stored until Post
+    const menus = opened.last().payload.components.slice(0, 3).map((r) => r.components[0].custom_id);
+    const draftId = menus[0].split(':')[2];
+    assert.deepEqual(menus, [`rd:pg:${draftId}:normal`, `rd:pg:${draftId}:difficult`, `rd:pg:${draftId}:nightmare`]);
+
+    const tick = (mode, values, userId = 'picker') => run({ kind: 'select', customId: `rd:pg:${draftId}:${mode}`, values, userId, ephemeralMessage: true });
+    let step = await tick('nightmare', ['3', '1']);
+    assert.match(step.text(), /🔴 \*\*Nightmare\*\* · Gates 1 & 3/);
+    step = await tick('normal', ['1', '2', '3']);
+    assert.match(step.text(), /🟢 \*\*Normal\*\* · Gates 1–3\n🔴 \*\*Nightmare\*\* · Gates 1 & 3/);
+    step = await tick('nightmare', ['1']); // changed their mind
+    step = await tick('difficult', []); // emptied a mode: nothing from it
+    assert.equal(step.last().type, 'update');
+
+    // Someone else can't drive it, even with the customId.
+    assert.match((await tick('normal', ['1'], 'intruder')).text(), /expired/);
+    assert.match((await run({ kind: 'button', customId: `rd:pp:${draftId}`, userId: 'intruder' })).text(), /expired/);
+
+    const posted = await run({ kind: 'button', customId: `rd:pp:${draftId}`, userId: 'picker', ephemeralMessage: true });
+    assert.equal(posted.calls[0].type, 'deferUpdate');
+    assert.match(posted.text(), /Posted \*\*Picked\*\*/);
+    assert.deepEqual(posted.last().payload.components, []);
+    const r = await latestRun();
+    assert.deepEqual(r.segments, [{ mode: 'normal', gates: [1, 2, 3] }, { mode: 'nightmare', gates: [1] }]);
+    assert.equal(r.lead_id, 'picker');
+    assert.deepEqual((await store.detail(r.id)).going.map((e) => [e.user_id, e.role]), [['picker', 'Healer']]);
+
+    // A second click on Post doesn't overwrite the "Posted" reply or post twice.
+    const again = await run({ kind: 'button', customId: `rd:pp:${draftId}`, userId: 'picker', ephemeralMessage: true });
+    assert.equal(again.last().type, 'reply');
+    assert.equal((await latestRun()).id, r.id);
+  });
+
+  await t.test('cancelling the picker posts nothing', async () => {
+    const before = (await latestRun()).id;
+    const opened = await run({ kind: 'command', sub: 'post', strings: { when: 'in 3h' }, userId: 'quitter' });
+    const draftId = opened.last().payload.components[0].components[0].custom_id.split(':')[2];
+    const cancelled = await run({ kind: 'button', customId: `rd:px:${draftId}`, userId: 'quitter', ephemeralMessage: true });
+    assert.match(cancelled.text(), /Nothing was posted/);
+    assert.equal((await latestRun()).id, before);
+  });
+
+  await t.test('the lead changes a run\'s plan from Manage', async () => {
+    await post({ plan: 'normal' }, { userId: 'planner' });
+    const r = await latestRun();
+    const opened = await run({ kind: 'button', customId: `rd:plan:${r.id}`, userId: 'planner', ephemeralMessage: true });
+    assert.match(opened.text(), /Changing the plan/);
+    const menus = opened.last().payload.components;
+    assert.deepEqual(menus[0].components[0].options.map((o) => o.default), [true, true, true]); // starts from the current plan
+    assert.equal(menus.at(-1).components[0].label, 'Save plan');
+    const draftId = menus[0].components[0].custom_id.split(':')[2];
+
+    assert.match((await run({ kind: 'button', customId: `rd:plan:${r.id}`, userId: 'not-lead', ephemeralMessage: true })).text(), /Only this run's lead/);
+
+    await run({ kind: 'select', customId: `rd:pg:${draftId}:normal`, values: ['2'], userId: 'planner', ephemeralMessage: true });
+    await run({ kind: 'select', customId: `rd:pg:${draftId}:difficult`, values: ['1', '2'], userId: 'planner', ephemeralMessage: true });
+    const saved = await run({ kind: 'button', customId: `rd:pp:${draftId}`, userId: 'planner', ephemeralMessage: true });
+    assert.match(saved.text(), /Plan saved[\s\S]*Managing/);
+    assert.deepEqual((await store.getRun(r.id)).segments, [{ mode: 'normal', gates: [2] }, { mode: 'difficult', gates: [1, 2] }]);
+
+    // Cancel goes back to the panel without changing anything.
+    const reopened = await run({ kind: 'button', customId: `rd:plan:${r.id}`, userId: 'planner', ephemeralMessage: true });
+    const id2 = reopened.last().payload.components[0].components[0].custom_id.split(':')[2];
+    await run({ kind: 'select', customId: `rd:pg:${id2}:nightmare`, values: ['3'], userId: 'planner', ephemeralMessage: true });
+    const back = await run({ kind: 'button', customId: `rd:px:${id2}`, userId: 'planner', ephemeralMessage: true });
+    assert.match(back.text(), /^\*\*Managing/);
+    assert.deepEqual((await store.getRun(r.id)).segments, [{ mode: 'normal', gates: [2] }, { mode: 'difficult', gates: [1, 2] }]);
+  });
+
   await t.test('personal timezone, list, help and autocomplete', async () => {
     const tz = await run({ kind: 'command', sub: 'timezone', strings: { zone: 'cet' }, userId: 'tz' });
     assert.match(tz.text(), /now read in \*\*Europe\/Berlin\*\*/);

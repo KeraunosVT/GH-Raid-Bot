@@ -79,8 +79,9 @@ test('manage panel lists people with where they stand', () => {
     going: [entry('a', 'Tank')],
     bench: [entry('b', 'Tank', 'bench', 'overflow'), entry('c', 'Tank', 'bench', 'overflow'), entry('d', 'DPS', 'bench', 'opt_in')],
   });
-  const [buttons, picker, adder] = panel.components;
-  assert.deepEqual(buttons.components.map((c) => c.custom_id), ['rd:edit:42', 'rd:close:42', 'rd:ping:42', 'rd:repost:42', 'rd:cancel:42']);
+  const [buttons, picker, adder, extra] = panel.components;
+  assert.deepEqual(buttons.components.map((c) => c.custom_id), ['rd:edit:42', 'rd:plan:42', 'rd:close:42', 'rd:ping:42', 'rd:cancel:42']);
+  assert.deepEqual(extra.components.map((c) => c.custom_id), ['rd:repost:42']);
   assert.deepEqual(picker.components[0].options.map((o) => o.description), [
     'Tank · in', 'Tank · bench #1', 'Tank · bench #2', 'DPS · bench (if needed)',
   ]);
@@ -88,9 +89,9 @@ test('manage panel lists people with where they stand', () => {
   assert.match(panel.content, /1 in · 3 on the bench/);
 
   const closed = render.managePanel({ run: run({ status: 'closed' }), going: [], bench: [] });
-  assert.equal(closed.components[0].components[1].custom_id, 'rd:reopen:42');
-  assert.equal(closed.components[0].components[2].disabled, true); // nobody to ping
-  assert.equal(closed.components.length, 2); // no picker when nobody is signed up
+  assert.equal(closed.components[0].components[2].custom_id, 'rd:reopen:42');
+  assert.equal(closed.components[0].components[3].disabled, true); // nobody to ping
+  assert.equal(closed.components.length, 3); // no member list when nobody is signed up
   assert.deepEqual(render.managePanel({ run: run({ status: 'cancelled' }), going: [], bench: [] }).components, []);
 });
 
@@ -129,4 +130,31 @@ test('managing: the lead, the manager role, or server staff', () => {
   assert.equal(canManage({ userId: 'x', member: { roles: ['officers'] }, perms: none, settings, run: r }), true);
   assert.equal(canManage({ userId: 'x', member: { roles: [] }, perms: new PermissionsBitField(PermissionFlagsBits.ManageGuild), settings, run: r }), true);
   assert.equal(canManage({ userId: 'x', member: { roles: ['officers'] }, perms: none, settings: { manager_role_id: null }, run: r }), false);
+});
+
+test('the plan picker: a gate menu per mode, ticked from the plan', () => {
+  const { raids } = require('../src/catalog');
+  const picker = render.planPicker({
+    draftId: 'abc', raid: raids[0], header: 'Posting',
+    segments: [{ mode: 'normal', gates: [1, 2, 3] }, { mode: 'nightmare', gates: [2] }], submitLabel: 'Post run',
+  });
+  const [normal, difficult, nightmare, buttons] = picker.components;
+  assert.equal(picker.components.length, 4);
+  for (const [r, key] of [[normal, 'normal'], [difficult, 'difficult'], [nightmare, 'nightmare']]) {
+    const menu = r.components[0];
+    assert.equal(menu.custom_id, `rd:pg:abc:${key}`);
+    assert.deepEqual([menu.min_values, menu.max_values, menu.options.length], [0, 3, 3]);
+  }
+  assert.deepEqual(normal.components[0].options.map((o) => o.default), [true, true, true]);
+  assert.deepEqual(difficult.components[0].options.map((o) => o.default), [false, false, false]);
+  assert.deepEqual(nightmare.components[0].options.map((o) => o.default), [false, true, false]);
+  assert.equal(nightmare.components[0].options[1].label, 'Nightmare · Gate 2');
+  assert.deepEqual(buttons.components.map((c) => [c.custom_id, c.label, c.disabled]), [
+    ['rd:pp:abc', 'Post run', false], ['rd:px:abc', 'Cancel', false],
+  ]);
+  assert.match(picker.content, /🟢 \*\*Normal\*\* · Gates 1–3\n🔴 \*\*Nightmare\*\* · Gate 2/);
+
+  const empty = render.planPicker({ draftId: 'abc', raid: raids[0], header: 'x', segments: [], submitLabel: 'Post run' });
+  assert.equal(empty.components.at(-1).components[0].disabled, true); // nothing to post yet
+  assert.match(empty.content, /tick gates/);
 });
