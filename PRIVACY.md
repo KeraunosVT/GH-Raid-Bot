@@ -64,7 +64,7 @@ Your data is never sold, never used for advertising, and never shared except as 
 
 ## Your choices
 
-- **Leave a run:** press **Withdraw** on its post. Your signup for that run is deleted.
+- **Leave a run:** press **Withdraw** on its post. Your signup for that run is deleted. A cancelled run has no buttons, but it's deleted on the same 30-day schedule as every other run.
 - **Clear your timezone:** run `/raid timezone zone:server`.
 - **Remove everything for a server:** a server admin can remove the bot, which deletes all of that server's runs, signups and settings.
 - **Anything else:** to ask what the bot holds about you, or to have it deleted, open an issue at <https://github.com/KeraunosVT/GH-Raid-Bot/issues>. Don't post personal information in the issue: say what you need, and we'll arrange a private way to verify it's you.
