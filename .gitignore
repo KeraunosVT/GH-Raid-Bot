@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Secrets: the bot token and database URL live here
+.env
+.env.*
+!.env.example
+
+# Database CA certificates (DATABASE_CA_FILE). Not secret, but host-specific.
+*.crt
+*.pem
+
+# Logs and runtime files
+logs/
+*.log
+npm-debug.log*
+*.pid
+
+# Test coverage
+coverage/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
