@@ -12,6 +12,7 @@ const { parsePlan, formatPlan, planSuggestions } = require('./plan');
 const { parseWhen, resolveTimeZone, zoneSuggestions, whenSuggestions, formatForInput, formatShort, unix } = require('./time');
 const { canPost, canManage } = require('./permissions');
 const { RaidError } = require('./store');
+const { createDrafts } = require('./drafts');
 const render = require('./render');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
@@ -33,19 +34,19 @@ const forbidden = () => new RaidError('forbidden', "Only this run's lead or a ra
 function helpText() {
   return [
     '## ⛩️ Raid signups',
-    '**Posting a run:** `/raid post plan:normal 1-3 when:fri 8pm`. Add `my_role` to sign yourself up, plus a title or notes if you like.',
-    '• **plan** is modes and gates: `normal 1-3`, `nightmare 1`, `normal 1-3 + difficult 1-2`.',
+    '**Posting a run:** `/raid post when:fri 8pm`, then tick the gates you want in each mode. Add `my_role` to sign yourself up, plus a title or notes if you like.',
+    '• Or type the **plan** straight in: `normal 1-3`, `nightmare 1`, `normal 1-3 + difficult 1-2`.',
     '• **when** is read on your clock: `fri 8pm`, `tomorrow 20:30`, `nov 21 9pm`, `in 2h`. Set yours once with `/raid timezone`.',
     '',
     '**Signing up:** press your role on the post. If the role is full you go on the bench and move up automatically when a slot opens (you get a DM). **Bench** means "available if needed": the lead brings you in. **Withdraw** takes you off.',
     '',
-    "**Leads:** the post's **Manage** button edits the run, closes or reopens signups, pings the roster, moves people between roster and bench, adds people, reposts it, or cancels it. Server staff (Manage Server or Manage Events) and the server's manager role can manage any run.",
+    "**Leads:** the post's **Manage** button edits the run, changes its plan, closes or reopens signups, pings the roster, moves people between roster and bench, adds people, reposts it, or cancels it. Server staff (Manage Server or Manage Events) and the server's manager role can manage any run.",
     '',
     '**Server admins:** `/raid-setup set` picks a default channel, who may post runs, a manager role, the server timezone and the reminder time. The roster is pinged before each run starts, and signups close when it does.',
   ].join('\n');
 }
 
-function createInteractionHandler({ store, posts, client, log = console }) {
+function createInteractionHandler({ store, posts, client, drafts = createDrafts(), log = console }) {
   const lastPing = new Map();
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -130,8 +131,13 @@ function createInteractionHandler({ store, posts, client, log = console }) {
     }
 
     const raid = raidOf(options.getString('raid')) || raids[0];
-    const plan = parsePlan(raid, options.getString('plan', true));
-    if (!plan.ok) return say(interaction, plan.error);
+    const planText = options.getString('plan')?.trim();
+    let segments = null;
+    if (planText) {
+      const plan = parsePlan(raid, planText);
+      if (!plan.ok) return say(interaction, plan.error);
+      segments = plan.segments;
+    }
 
     const tz = await store.timezoneFor(user.id, guildId);
     const when = parseWhen(options.getString('when', true), { timeZone: tz.timezone });
@@ -143,16 +149,35 @@ function createInteractionHandler({ store, posts, client, log = console }) {
     const missing = missingPermissions(channel);
     if (missing.length) return say(interaction, `I need **${missing.join(', ')}** in <#${channel.id}> to post there.`);
 
-    await interaction.deferReply({ flags: EPHEMERAL });
-    const run = await store.createRun({
-      guildId, channelId: channel.id, raidKey: raid.key, segments: plan.segments, roleCaps: raid.roles,
+    // Everything but the plan is settled here, so the picker can only fail
+    // on the plan.
+    const details = {
+      guildId, ownerId: user.id, channelId: channel.id, raidKey: raid.key,
       title: options.getString('title')?.trim() || raid.name,
       notes: options.getString('notes')?.trim() || null,
-      startsAt: when.date, leadId: user.id,
+      startsAt: when.date, tz,
+      myRole: options.getString('my_role'),
+      displayName: displayNameOf(interaction.member, user),
+    };
+
+    if (!segments) {
+      const draft = { kind: 'post', ...details, segments: [] };
+      const draftId = drafts.create(draft);
+      return interaction.reply({ ...pickerFor(draftId, draft), flags: EPHEMERAL, allowedMentions: NO_PINGS });
+    }
+    await interaction.deferReply({ flags: EPHEMERAL });
+    return publish(interaction, { ...details, segments });
+  }
+
+  // Creates the run and its post. The interaction is already deferred.
+  async function publish(interaction, d) {
+    const raid = raidOf(d.raidKey) || raids[0];
+    const run = await store.createRun({
+      guildId: d.guildId, channelId: d.channelId, raidKey: raid.key, segments: d.segments, roleCaps: raid.roles,
+      title: d.title, notes: d.notes, startsAt: d.startsAt, leadId: d.ownerId,
     });
-    const myRole = options.getString('my_role');
-    if (myRole) {
-      await store.join({ runId: run.id, guildId, userId: user.id, displayName: displayNameOf(interaction.member, user), role: myRole });
+    if (d.myRole) {
+      await store.join({ runId: run.id, guildId: d.guildId, userId: d.ownerId, displayName: d.displayName, role: d.myRole });
     }
 
     let message;
@@ -160,13 +185,87 @@ function createInteractionHandler({ store, posts, client, log = console }) {
       message = await posts.announce(run.id);
     } catch (err) {
       await store.deleteRun(run.id);
-      return say(interaction, `Couldn't post in <#${channel.id}>: ${err.message}`);
+      return say(interaction, `Couldn't post in <#${d.channelId}>: ${err.message}`);
     }
-    const at = unix(when.date);
+    const at = unix(d.startsAt);
     return interaction.editReply({
-      content: `Posted **${escapeMarkdown(run.title)}** for <t:${at}:F> (<t:${at}:R>): ${message.url}\n${tzNote(when.date, tz)}`,
+      content: `Posted **${escapeMarkdown(run.title)}** for <t:${at}:F> (<t:${at}:R>): ${message.url}\n${tzNote(d.startsAt, d.tz)}`,
+      components: [],
       allowedMentions: NO_PINGS,
     });
+  }
+
+  // ── The plan picker ───────────────────────────────────────────────────────
+
+  function pickerFor(draftId, draft) {
+    const raid = raidOf(draft.raidKey) || raids[0];
+    const at = unix(draft.startsAt || Date.now());
+    const header = draft.kind === 'post'
+      ? `**Posting ${escapeMarkdown(draft.title)}** for <t:${at}:F> in <#${draft.channelId}>.\nTick the gates you want in each mode, then post.`
+      : `**Changing the plan for ${escapeMarkdown(draft.title)}.**\nTick the gates you want in each mode, then save.`;
+    return render.planPicker({
+      draftId, raid, segments: draft.segments, header, submitLabel: draft.kind === 'post' ? 'Post run' : 'Save plan',
+    });
+  }
+
+  // A draft, only for the person and server that opened it.
+  function ownDraft(interaction, draftId) {
+    const draft = drafts.get(draftId);
+    if (!draft || draft.ownerId !== interaction.user.id || draft.guildId !== interaction.guildId) return null;
+    return draft;
+  }
+
+  const EXPIRED = 'This picker has expired. Run `/raid post` again, or reopen **Manage** on the post.';
+
+  async function pickGates(interaction, draftId, modeKey) {
+    const draft = ownDraft(interaction, draftId);
+    if (!draft) return interaction.update({ content: EXPIRED, components: [] });
+    const raid = raidOf(draft.raidKey) || raids[0];
+    if (!raid.modes.some((m) => m.key === modeKey)) return undefined;
+
+    const gates = [...new Set((interaction.values || []).map(Number))]
+      .filter((g) => Number.isInteger(g) && g >= 1 && g <= raid.gates)
+      .sort((a, b) => a - b);
+    const byMode = new Map(draft.segments.map((seg) => [seg.mode, seg.gates]));
+    if (gates.length) byMode.set(modeKey, gates);
+    else byMode.delete(modeKey);
+    const segments = raid.modes.filter((m) => byMode.has(m.key)).map((m) => ({ mode: m.key, gates: byMode.get(m.key) }));
+
+    drafts.update(draftId, { segments });
+    return interaction.update({ ...pickerFor(draftId, draft), allowedMentions: NO_PINGS });
+  }
+
+  async function submitPicker(interaction, draftId) {
+    const draft = ownDraft(interaction, draftId);
+    // A second click after the first has posted finds no draft. Answer it
+    // separately rather than overwrite the "Posted" reply.
+    if (!draft) return interaction.reply({ content: EXPIRED, flags: EPHEMERAL });
+    if (!draft.segments.length) return interaction.update({ ...pickerFor(draftId, draft), allowedMentions: NO_PINGS });
+
+    if (draft.kind === 'post') {
+      drafts.delete(draftId);
+      if (new Date(draft.startsAt) <= new Date()) {
+        return interaction.update({ content: 'That start time has already passed. Run `/raid post` again.', components: [] });
+      }
+      await interaction.deferUpdate();
+      return publish(interaction, draft);
+    }
+
+    await managedRun(interaction, draft.runId);
+    drafts.delete(draftId);
+    await store.updateRun(draft.runId, { segments: draft.segments });
+    await posts.renderNow(draft.runId);
+    return showPanel(interaction, draft.runId, '✅ Plan saved.');
+  }
+
+  async function cancelPicker(interaction, draftId) {
+    const draft = ownDraft(interaction, draftId);
+    drafts.delete(draftId);
+    if (draft?.kind === 'edit') {
+      await managedRun(interaction, draft.runId);
+      return showPanel(interaction, draft.runId);
+    }
+    return interaction.update({ content: draft ? 'Cancelled. Nothing was posted.' : EXPIRED, components: [] });
   }
 
   async function listRuns(interaction) {
@@ -405,6 +504,15 @@ function createInteractionHandler({ store, posts, client, log = console }) {
         return interaction.showModal(editModal(run, tz.timezone));
       }
 
+      case 'plan': {
+        const run = await managedRun(interaction, id);
+        const draft = {
+          kind: 'edit', ownerId: interaction.user.id, guildId: interaction.guildId,
+          runId: run.id, raidKey: run.raid_key, title: run.title, segments: run.segments || [],
+        };
+        return interaction.update({ ...pickerFor(drafts.create(draft), draft), allowedMentions: NO_PINGS });
+      }
+
       case 'close':
       case 'reopen':
         await managedRun(interaction, id);
@@ -488,6 +596,10 @@ function createInteractionHandler({ store, posts, client, log = console }) {
       case 'benchas': return joinRun(interaction, id, a, true);
       case 'bench': return benchPicker(interaction, id);
       case 'leave': return leaveRun(interaction, id);
+      // The plan picker: id is a draft, not a run.
+      case 'pg': return pickGates(interaction, id, a);
+      case 'pp': return submitPicker(interaction, id);
+      case 'px': return cancelPicker(interaction, id);
       default: return manage(interaction, action, id, a, b);
     }
   }

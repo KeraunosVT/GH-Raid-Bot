@@ -169,11 +169,11 @@ function managePanel({ run, going, bench }) {
   const id = run.id;
   const rows = [row(
     button(`rd:edit:${id}`, 'Edit', { emoji: '✏️' }),
+    button(`rd:plan:${id}`, 'Change plan', { emoji: '🗺️' }),
     run.status === 'open'
       ? button(`rd:close:${id}`, 'Close signups', { emoji: '🔒' })
       : button(`rd:reopen:${id}`, 'Reopen signups', { emoji: '🔓' }),
     button(`rd:ping:${id}`, 'Ping roster', { emoji: '📣', disabled: going.length === 0 }),
-    button(`rd:repost:${id}`, 'Repost', { emoji: '🔁' }),
     button(`rd:cancel:${id}`, 'Cancel run', { emoji: '🚫', style: ButtonStyle.Danger }),
   )];
 
@@ -193,6 +193,7 @@ function managePanel({ run, going, bench }) {
     }));
   }
   rows.push(row({ type: ComponentType.UserSelect, custom_id: `rd:add:${id}`, placeholder: 'Add someone to this run…' }));
+  rows.push(row(button(`rd:repost:${id}`, 'Repost', { emoji: '🔁' })));
 
   const status = run.status === 'open' ? 'Signups open' : 'Signups closed';
   const more = everyone.length > 25 ? `\n*The list shows the first 25 of ${everyone.length}.*` : '';
@@ -225,6 +226,41 @@ function addPanel(run, userId, displayName) {
       ...ROLES.filter((r) => caps[r] > 0).map((r) => button(`rd:addas:${run.id}:${userId}:${r}`, r, { emoji: ROLE_EMOJI[r] })),
       button(`rd:manage:${run.id}`, 'Back'),
     )],
+  };
+}
+
+// ── The plan picker ─────────────────────────────────────────────────────────
+// One menu per mode listing its gates; tick any gates in any modes. Used when
+// /raid post is run without a typed plan, and by the lead's "Change plan".
+//
+// Discord allows five rows, one of which holds the buttons, so a raid shows
+// at most four modes here. Typing the plan still reaches any mode.
+const PICKER_MODES = 4;
+
+function planPicker({ draftId, raid, segments, header, submitLabel }) {
+  const chosen = new Map(segments.map((s) => [s.mode, s.gates]));
+  const gates = Math.min(raid.gates, 25);
+  const rows = raid.modes.slice(0, PICKER_MODES).map((m) => row({
+    type: ComponentType.StringSelect,
+    custom_id: `rd:pg:${draftId}:${m.key}`,
+    placeholder: `${m.emoji} ${m.label}: no gates`,
+    min_values: 0,
+    max_values: gates,
+    options: Array.from({ length: gates }, (_, i) => ({
+      label: `${m.label} · Gate ${i + 1}`,
+      value: String(i + 1),
+      emoji: { name: m.emoji },
+      default: (chosen.get(m.key) || []).includes(i + 1),
+    })),
+  }));
+  rows.push(row(
+    button(`rd:pp:${draftId}`, submitLabel, { style: ButtonStyle.Success, disabled: segments.length === 0 }),
+    button(`rd:px:${draftId}`, 'Cancel'),
+  ));
+  const plan = planLines(raid, segments);
+  return {
+    content: `${header}\n\n**Plan:**${plan.length ? `\n${plan.join('\n')}` : ' *tick gates in at least one mode below.*'}`,
+    components: rows,
   };
 }
 
@@ -267,6 +303,6 @@ function pingMessage({ run, going }, byId) {
 module.exports = {
   runEmbed, runButtons, runMessage, benchPicker,
   joinReply, withdrawReply, promotionDm, postLink,
-  managePanel, memberPanel, addPanel, cancelConfirm,
+  managePanel, memberPanel, addPanel, cancelConfirm, planPicker,
   reminderMessage, cancelMessage, pingMessage,
 };
