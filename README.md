@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.png" alt="GH Raid Bot icon" width="160"></p>
+
 # GH Raid Bot
 
 A Discord bot for *Throne & Liberty* raid signups that **any server can invite**. A lead posts a run, people pick Tank, DPS or Healer on the post, and anyone past a role's cap goes to the bench and moves up automatically when a slot opens.
@@ -99,6 +101,7 @@ Add an entry to [`raids.json`](raids.json): its modes (easiest first, each with 
 | `src/time.js` · `src/plan.js` | Reading typed times and plans |
 | `src/drafts.js` | Half-built posts and plan edits, held in memory while the picker is open |
 | `migrations/` | The schema, applied in order on start |
+| `assets/` | The app icon: `icon.png` to upload, `icon.svg` to edit |
 
 ## Development
 
