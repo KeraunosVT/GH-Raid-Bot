@@ -40,7 +40,7 @@ function helpText() {
     '',
     '**Signing up:** press your role on the post. If the role is full you go on the bench and move up automatically when a slot opens (you get a DM). **Bench** means "available if needed": the lead brings you in. **Withdraw** takes you off.',
     '',
-    "**Leads:** the post's **Manage** button edits the run, changes its plan, closes or reopens signups, pings the roster, moves people between roster and bench, adds people, reposts it, or cancels it. Server staff (Manage Server or Manage Events) and the server's manager role can manage any run.",
+    "**Leads:** the post's **Manage** button edits the run, changes its plan, closes or reopens signups, pings the roster, changes someone's role, moves people between roster and bench, adds people, reposts it, or cancels it. Server staff (Manage Server or Manage Events) and the server's manager role can manage any run.",
     '',
     '**Server admins:** `/raid-setup set` picks a default channel, who may post runs, a manager role, the server timezone and the reminder time. The roster is pinged before each run starts, and signups close when it does.',
   ].join('\n');
@@ -465,6 +465,36 @@ function createInteractionHandler({ store, posts, client, drafts = createDrafts(
     return showPanel(interaction, id, note);
   }
 
+  // Back on that member's panel afterwards, so the lead sees where they landed.
+  async function changeMemberRole(interaction, id, userId, role) {
+    await managedRun(interaction, id);
+    const result = await store.changeRole({ runId: id, guildId: interaction.guildId, userId, role });
+    const after = await store.detail(id, interaction.guildId);
+    const entry = [...after.going, ...after.bench].find((e) => e.user_id === userId);
+    if (!entry) return showPanel(interaction, id, "They're no longer signed up.");
+
+    const who = `**${escapeMarkdown(entry.display_name)}**`;
+    let note;
+    if (!result.changed) note = `${who} is already ${ROLE_EMOJI[role]} ${role}.`;
+    else {
+      posts.refresh(id);
+      note = `${who} is now ${ROLE_EMOJI[role]} ${role}`
+        + (entry.status === 'going' ? ', in the roster.'
+          : entry.bench_kind === 'overflow' ? `. ${ROLE_PLURAL[role]} are full, so they're #${result.position} on the bench.`
+            : ', on the bench (if needed).');
+      if (result.promoted) {
+        note += ` **${escapeMarkdown(result.promoted.display_name)}** moved up into their old ${result.from.role} slot.`;
+        posts.notifyPromotion(result.run, result.promoted);
+      }
+      if (userId !== interaction.user.id) {
+        const link = render.postLink(result.run);
+        posts.dm(userId, render.roleChangeDm(result.run, entry, interaction.user.id) + (link ? `\n${link}` : ''));
+      }
+    }
+    const panel = render.memberPanel(after.run, entry, after.bench);
+    return interaction.update({ ...panel, content: `${note}\n\n${panel.content}`, allowedMentions: NO_PINGS });
+  }
+
   async function addMember(interaction, id, userId, role) {
     const run = await managedRun(interaction, id);
     let name = 'Unknown';
@@ -569,6 +599,10 @@ function createInteractionHandler({ store, posts, client, drafts = createDrafts(
       case 'mv':
         if (!['going', 'bench', 'remove'].includes(b)) return undefined;
         return moveMember(interaction, id, a, b);
+
+      case 'role':
+        if (!ROLES.includes(b)) return undefined;
+        return changeMemberRole(interaction, id, a, b);
 
       case 'add': {
         const run = await managedRun(interaction, id);

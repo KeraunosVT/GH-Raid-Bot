@@ -138,6 +138,15 @@ function withdrawReply(result) {
 const promotionDm = (run, entry, guildName) => `✅ A slot opened up. You're in for **${escapeMarkdown(run.title)}**`
   + `${guildName ? ` in **${escapeMarkdown(guildName)}**` : ''} as ${roleText(entry.role)}, starting <t:${unix(run.starts_at)}:R>.`;
 
+// To someone whose role the lead changed.
+function roleChangeDm(run, entry, byId) {
+  const where = entry.status === 'going' ? "You're in the roster."
+    : entry.bench_kind === 'overflow' ? "You're on the bench, and will be moved up if a slot opens."
+      : "You're on the bench, available if needed.";
+  return `🔄 <@${byId}> changed your role for **${escapeMarkdown(run.title)}** to ${roleText(entry.role)}`
+    + ` (starts <t:${unix(run.starts_at)}:R>). ${where}`;
+}
+
 const postLink = (run) => (run.message_id
   ? `https://discord.com/channels/${run.guild_id}/${run.channel_id}/${run.message_id}` : null);
 
@@ -214,6 +223,11 @@ function memberPanel(run, entry, benchList) {
       }),
       button(`rd:mv:${id}:${entry.user_id}:remove`, 'Remove', { emoji: '✖️', style: ButtonStyle.Danger }),
       button(`rd:manage:${id}`, 'Back'),
+    ), row(
+      // Change role: one button per role, their current one disabled.
+      ...ROLES.filter((r) => (run.role_caps || {})[r] > 0).map((r) => button(
+        `rd:role:${id}:${entry.user_id}:${r}`, `Make ${r}`, { emoji: ROLE_EMOJI[r], disabled: entry.role === r },
+      )),
     )],
   };
 }
@@ -302,7 +316,7 @@ function pingMessage({ run, going }, byId) {
 
 module.exports = {
   runEmbed, runButtons, runMessage, benchPicker,
-  joinReply, withdrawReply, promotionDm, postLink,
+  joinReply, withdrawReply, promotionDm, roleChangeDm, postLink,
   managePanel, memberPanel, addPanel, cancelConfirm, planPicker,
   reminderMessage, cancelMessage, pingMessage,
 };

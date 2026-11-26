@@ -158,3 +158,15 @@ test('the plan picker: a gate menu per mode, ticked from the plan', () => {
   assert.equal(empty.components.at(-1).components[0].disabled, true); // nothing to post yet
   assert.match(empty.content, /tick gates/);
 });
+
+test('the member panel offers every other role', () => {
+  const panel = render.memberPanel(run(), entry('u1', 'DPS'), []);
+  const [, roles] = panel.components;
+  assert.deepEqual(roles.components.map((c) => [c.custom_id, c.label, c.disabled]), [
+    ['rd:role:42:u1:Tank', 'Make Tank', false],
+    ['rd:role:42:u1:DPS', 'Make DPS', true],
+    ['rd:role:42:u1:Healer', 'Make Healer', false],
+  ]);
+  const dm = render.roleChangeDm(run(), entry('u1', 'Healer', 'bench', 'overflow'), 'lead');
+  assert.match(dm, /<@lead> changed your role for \*\*Altar of Calanthia\*\* to 💚 \*\*Healer\*\*.*moved up if a slot opens/);
+});

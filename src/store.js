@@ -348,6 +348,47 @@ function createStore(pool) {
     });
   }
 
+  // The lead changing someone's role. Their place is kept as far as the new
+  // role allows:
+  //   in the roster   → into the new role if it has room, refused if it's
+  //                     full (bumping someone else is the lead's call, made
+  //                     first). Their old slot goes to the next overflow
+  //                     entry in the old role.
+  //   overflow bench  → straight into the new role if it has room; otherwise
+  //                     waiting for the new role instead, in their old place
+  //                     in line (signed_up_at is kept).
+  //   opt-in bench    → still "if needed", under the new role.
+  async function changeRole({ runId, guildId = null, userId, role }) {
+    return tx(async (c) => {
+      const run = await lockRun(c, runId, guildId);
+      if (run.status === 'cancelled') fail('cancelled');
+      if (!ROLES.includes(role) || !(role in (run.role_caps || {}))) fail('bad_role');
+      const { rows } = await c.query('select * from raid_entries where run_id = $1 and user_id = $2', [run.id, userId]);
+      const entry = rows[0];
+      if (!entry) fail('not_signed_up');
+      if (entry.role === role) return { run, entry, changed: false, promoted: null, position: null };
+
+      const room = await countGoing(c, run.id, role) < Number(run.role_caps[role] || 0);
+      let status = entry.status;
+      let benchKind = entry.bench_kind;
+      if (entry.status === 'going' && !room) fail('role_full');
+      if (entry.status === 'bench' && entry.bench_kind === 'overflow' && room) {
+        status = 'going';
+        benchKind = null;
+      }
+
+      const { rows: updated } = await c.query(
+        'update raid_entries set role = $2, status = $3, bench_kind = $4 where id = $1 returning *',
+        [entry.id, role, status, benchKind],
+      );
+      const promoted = entry.status === 'going' ? await fillRole(c, run, entry.role) : null;
+      return {
+        run, entry: updated[0], from: entry, changed: true, promoted,
+        position: await benchPosition(c, run.id, userId, updated[0]),
+      };
+    });
+  }
+
   // ── Sweeps ────────────────────────────────────────────────────────────────
 
   // Runs whose reminder is due, each claimed so it's sent once even with two
@@ -401,7 +442,7 @@ function createStore(pool) {
   return {
     getSettings, updateSettings, getUserTimezone, setUserTimezone, timezoneFor,
     createRun, setMessage, deleteRun, getRun, detail, listUpcoming, updateRun, setStatus,
-    join, withdraw, move,
+    join, withdraw, move, changeRole,
     claimReminders, closeStarted, purgeOld, deleteGuild,
   };
 }

@@ -208,6 +208,28 @@ test('interactions', { skip }, async (t) => {
     assert.ok(sent.at(-1).allowedMentions.users.includes('t2'));
   });
 
+  await t.test('the lead changes a member\'s role from Manage', async () => {
+    await post({ plan: 'normal' }, { userId: 'rl' });
+    const r = await latestRun();
+    await run({ kind: 'button', customId: `rd:join:${r.id}:Tank`, userId: 'tankA' });
+    await run({ kind: 'button', customId: `rd:join:${r.id}:Tank`, userId: 'tankB' }); // bench
+    for (const h of ['h1', 'h2']) await run({ kind: 'button', customId: `rd:join:${r.id}:Healer`, userId: h });
+    const asLead = (customId, userId = 'rl') => run({ kind: 'button', customId, userId, ephemeralMessage: true });
+
+    dms.length = 0;
+    const moved = await asLead(`rd:role:${r.id}:tankA:DPS`);
+    assert.equal(moved.last().type, 'update');
+    assert.match(moved.text(), /\*\*tankA-name\*\* is now ⚔️ DPS, in the roster\. \*\*tankB-name\*\* moved up into their old Tank slot/);
+    assert.match(moved.text(), /\n\n\*\*tankA-name\*\* · ⚔️ \*\*DPS\*\*, in the roster/); // back on their panel
+    assert.deepEqual(dms.sort(), ['tankA', 'tankB']); // the changed member, and whoever moved up
+
+    assert.match((await asLead(`rd:role:${r.id}:tankB:Healer`)).text(), /That role is full/);
+    assert.match((await asLead(`rd:role:${r.id}:tankA:DPS`)).text(), /already ⚔️ DPS/);
+    assert.match((await asLead(`rd:role:${r.id}:tankA:Tank`, 'h1')).text(), /Only this run's lead/);
+    assert.equal((await store.detail(r.id)).going.find((e) => e.user_id === 'tankA').role, 'DPS');
+    assert.match((await asLead(`rd:role:${r.id}:tankA:Bard`)).text() || '', /^$/); // unknown role: ignored
+  });
+
   await t.test('editing keeps an untouched time, even after the start', async () => {
     await post({ title: 'Old' }, { userId: 'ed' });
     const r = await latestRun();
