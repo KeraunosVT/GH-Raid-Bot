@@ -206,6 +206,67 @@ test('store', { skip }, async (t) => {
     assert.equal((await store.getSettings('never-set')).reminder_minutes, 15);
   });
 
+  await t.test('the lead changes roles, keeping places where the new role allows', async () => {
+    const run = await newRun();
+    await join(run, 'a', 'Tank'); //   Tank 1/1
+    await join(run, 'b', 'Tank'); //   Tank bench #1
+    await join(run, 'c', 'Healer');
+    await join(run, 'd', 'Healer'); // Healer 2/2
+    await join(run, 'e', 'Healer'); // Healer bench #1
+    await join(run, 'f', 'DPS', { bench: true }); // if needed
+    const change = (userId, role, extra = {}) => store.changeRole({ runId: run.id, userId, role, ...extra });
+
+    // In the roster → a role with room: moved, and the old slot fills from the bench.
+    const a = await change('a', 'DPS');
+    assert.deepEqual([a.entry.role, a.entry.status, a.from.role, a.promoted.user_id], ['DPS', 'going', 'Tank', 'b']);
+
+    // In the roster → a full role: refused, nobody bumped.
+    await assert.rejects(change('b', 'Healer'), { code: 'role_full' });
+
+    // Waiting for a full role → another full role: still waiting, now for that one.
+    const e1 = await change('e', 'Tank');
+    assert.deepEqual([e1.entry.status, e1.entry.bench_kind, e1.position], ['bench', 'overflow', 1]);
+    assert.equal(e1.promoted, null);
+
+    // Waiting → a role with room: straight in.
+    const e2 = await change('e', 'DPS');
+    assert.deepEqual([e2.entry.role, e2.entry.status], ['DPS', 'going']);
+
+    // "If needed" stays "if needed".
+    const f = await change('f', 'Healer');
+    assert.deepEqual([f.entry.role, f.entry.status, f.entry.bench_kind], ['Healer', 'bench', 'opt_in']);
+
+    assert.equal((await change('c', 'Healer')).changed, false);
+    assert.deepEqual(await where(run), {
+      going: ['a:DPS', 'b:Tank', 'c:Healer', 'd:Healer', 'e:DPS'],
+      bench: ['f:Healer:opt_in'],
+    });
+
+    await assert.rejects(change('nobody', 'DPS'), { code: 'not_signed_up' });
+    await assert.rejects(change('a', 'Bard'), { code: 'bad_role' });
+    await assert.rejects(change('a', 'Tank', { guildId: 'g2' }), { code: 'not_found' });
+  });
+
+  await t.test('a changed role keeps its place in the new line', async () => {
+    const run = await newRun();
+    await join(run, 'tank', 'Tank');
+    await join(run, 'h1', 'Healer');
+    await join(run, 'h2', 'Healer');
+    await join(run, 'early', 'Healer'); // waiting for Healer, signed up first
+    await join(run, 'late', 'Tank'); //    waiting for Tank, signed up later
+    const moved = await store.changeRole({ runId: run.id, userId: 'early', role: 'Tank' });
+    assert.equal(moved.position, 1); // ahead of 'late', by signup time
+    await store.withdraw({ runId: run.id, userId: 'tank' });
+    assert.deepEqual((await where(run)).going.filter((x) => x.endsWith(':Tank')), ['early:Tank']);
+  });
+
+  await t.test('roles on a cancelled run can\'t change', async () => {
+    const run = await newRun();
+    await join(run, 'a', 'DPS');
+    await store.setStatus(run.id, 'cancelled');
+    await assert.rejects(store.changeRole({ runId: run.id, userId: 'a', role: 'Tank' }), { code: 'cancelled' });
+  });
+
   await t.test('leaving a server deletes everything it owned', async () => {
     const run = await newRun({ guildId: 'gone' });
     await join(run, 'a', 'DPS');

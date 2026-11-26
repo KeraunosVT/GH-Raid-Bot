@@ -24,6 +24,7 @@ There's no website, no login and no per-server setup required, and one copy of t
 - Edit the title, time or notes.
 - **Change plan** opens the same picker, starting from the run's current gates.
 - Close or reopen signups, and ping the roster.
+- Change someone's role. Someone in the roster moves only into a role with an open slot (otherwise you're asked to make room first), and their old slot goes to the next person waiting. Someone on the bench joins the new role's line, keeping their place, or goes straight in if it has room. They get a DM either way.
 - Move someone between roster and bench, or remove them.
 - Add someone who hasn't clicked.
 - Repost a post that was deleted or buried.
